@@ -16,3 +16,11 @@ The article reports an anomaly during a launch vehicle test. The coverage may be
 Alert reason: Critical development
 
 Automated screening of publisher coverage; reported claims are not independent official confirmation.
+
+
+NIL REPORT (illustrative)
+Subject: [QRT NIL] No new critical or negative news
+DoS / ISRO — QRT News Monitoring Report
+Trigger: schedule
+Result: No new critical or negative news detected among the successfully screened results.
+New qualifying articles: 0

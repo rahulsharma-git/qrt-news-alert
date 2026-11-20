@@ -61,6 +61,22 @@ class TestMonitor(unittest.TestCase):
         state={'version':1,'sent':{},'checked':{}}
         with tempfile.TemporaryDirectory() as tmp, patch.object(m,'ROOT',Path(tmp)), patch.object(m,'load_state',return_value=state), patch.object(m,'mail_config'), patch.object(m,'discover',return_value=([a],{'test':1})), patch.object(m,'verify',return_value=(a,'verified')), patch.object(m,'send') as send, patch.object(m,'save_state') as save:
             m.run(); self.assertTrue(state['sent']); save.assert_called_once(); send.assert_called_once()
-            state['checked']={}; m.run(); send.assert_called_once()
+            state['checked']={}; m.run(); self.assertEqual(send.call_count,2); self.assertEqual(send.call_args.args[0],[])
+
+    def test_nil_email(self):
+        subject,plain,rich=m.format_email([],NOW,{'sources':{'test':0},'candidates':0})
+        self.assertTrue(subject.startswith('[QRT NIL]')); self.assertIn('No new critical',plain)
+        self.assertIn('Trigger',rich)
+    def test_warning_email(self):
+        subject,plain,_=m.format_email([],NOW,{'sources':{'ok':0,'bad':'ERROR'},'candidates':0})
+        self.assertTrue(subject.startswith('[QRT WARNING]')); self.assertIn('Coverage was incomplete',plain)
+    def test_failure_email(self):
+        with patch.object(m,'mail_config'), patch.object(m,'scan',side_effect=RuntimeError('source failure')), patch.object(m,'send') as send, patch.object(m,'save_state') as save:
+            with self.assertRaises(RuntimeError): m.run()
+            send.assert_called_once(); self.assertEqual(send.call_args.args[2]['error'],'RuntimeError'); save.assert_not_called()
+    def test_empty_scan_sends(self):
+        state={'version':1,'sent':{},'checked':{}}
+        with tempfile.TemporaryDirectory() as tmp, patch.object(m,'ROOT',Path(tmp)), patch.object(m,'load_state',return_value=state), patch.object(m,'mail_config'), patch.object(m,'discover',return_value=([],{'test':0})), patch.object(m,'send') as send, patch.object(m,'save_state'):
+            m.run(); send.assert_called_once(); self.assertEqual(send.call_args.args[0],[])
 
 if __name__=='__main__': unittest.main()

@@ -1,4 +1,4 @@
-# QRT News Alert — Build 1.0
+# QRT News Alert — Build 1.1
 
 Standalone, lightweight GitHub Actions project for early warning of critical or negative online news. Adapted from the supplied Social Media Intelligence Build 6.1.1 / V10.3, without the dashboard, X collection, Supabase, Word, PDF, Excel or daily report workflow. This is a rapid-alert workflow, not a replacement or a claim of full V10.3 daily-report research compliance.
 
@@ -28,12 +28,12 @@ Standalone, lightweight GitHub Actions project for early warning of critical or 
 `REPORT_RECIPIENTS` is accepted only as a fallback if `ALERT_RECIPIENTS` is empty. Optional Actions variable `GROQ_MODEL` overrides the default `openai/gpt-oss-20b`. The local classifier runs without an AI account. Only enable the third-party AI provider if permitted by your organization's data-processing rules; it receives public article title, publisher and an excerpt, not SMTP credentials or recipients. No API quota or free-tier availability is guaranteed.
 
 4. Under **Settings → Actions → General**, ensure Actions are enabled, the workflow may use `contents: write`, and branch protection/rulesets allow the GitHub Actions bot to commit the state file on the default branch. No PAT is required with ordinary write access. Do not weaken mandatory organizational protections; use an approved external state store instead if direct pushes are disallowed.
-5. Open **Actions → QRT - 15 minute news alert → Run workflow**. Keep `dry_run` checked for the first test. Inspect the job summary (source status, candidate counts, screening decisions and, if applicable, email preview). No email or state update occurs in a dry run. Then run with `dry_run` unchecked to enable real delivery, or allow the scheduled run. No alert email is sent if no qualifying news is found.
-6. Confirm a qualifying alert arrives and the state file gets a bot commit. A run can finish without an alert because no qualifying verified news is found; this is not a live SMTP test. Check Actions usage and failure notifications regularly.
+5. Open **Actions → QRT - 15 minute news alert → Run workflow**. Every manual, scheduled and workflow-file update run attempts to send one email, including NIL or WARNING reports when nothing qualifies. Confirm the message and review the job summary. A scan error attempts to send an ERROR report and leaves the job failed. Missing credentials, SMTP errors, runner/setup failures, skipped schedules and cancellations can prevent delivery.
+6. For an existing repository, replace `monitor.py`, `.github/workflows/qrt-news-alert.yml`, `README.md`, `SAMPLE_EMAIL.txt` and `test_monitor.py`. Do not overwrite `state/alert_history.json`, `config.json` or secrets. Existing history is preserved.
 
 ## 2. Schedule and coverage
 
-Cron `2,17,32,47 * * * *` runs at minutes 02,17,32,47 IST each hour (also every 15 minutes in UTC), approximately 96 scheduled runs per day. This offset avoids the top of the hour. GitHub-hosted schedules are best-effort, may be delayed or dropped, and only run from the default branch. They are not guaranteed 15-minute delivery or a 24x7 service-level agreement. Public repositories may have scheduled workflows disabled after 60 days without activity. Private runners consume Actions minutes; around 2,880 runs in 30 days, billed minutes depend on actual duration and plan. For an operationally critical SLA, use an approved always-on runner/scheduler and independent heartbeat monitoring.
+Cron `7,22,37,52 * * * *` runs at minutes 07,22,37,52 IST each hour (also every 15 minutes in UTC), approximately 96 scheduled runs per day. This offset avoids the top of the hour. GitHub-hosted schedules are best-effort, may be delayed or dropped, and only run from the default branch. They are not guaranteed 15-minute delivery or a 24x7 service-level agreement. Public repositories may have scheduled workflows disabled after 60 days without activity. Private runners consume Actions minutes; around 2,880 runs in 30 days, billed minutes depend on actual duration and plan. For an operationally critical SLA, use an approved always-on runner/scheduler and independent heartbeat monitoring.
 
 Discovery uses Google News RSS, Bing News RSS, GDELT and configured publisher-native feeds. Seven configurable search strings include DoS, ISRO, IN-SPACe, NSIL, missions, startups and adverse-event terms. Direct publisher pages must establish original article title, article body, English-language relevance and exact first-publication timestamp with timezone evidence. Feed timestamps are NOT substituted for original publication. Official sources are excluded as independent media rows. Inaccessible or date-only sources and unresolved aggregator links are skipped; feed access and indexing coverage are not exhaustive. Publisher claims are attributed, not independently corroborated. The system does not perform the daily report’s 39 queries, two sweeps or official fact verification. This trade-off prioritizes speed. A six-hour rolling lookback catches delayed indexing and skipped runs within that horizon, subject to source and candidate limits. First real run can email qualifying items published in the preceding six hours. Articles published earlier are excluded unless you temporarily enlarge the lookback. Each scan is bounded by candidate count and soft time budget, with a 12-minute GitHub job timeout.
 
@@ -41,7 +41,7 @@ Discovery uses Google News RSS, Bing News RSS, GDELT and configured publisher-na
 
 - Negative: critical, accusatory or reputation-damaging coverage directed at the monitored entities. All impact levels alert by default. `negative_min_impact` can be set to `Medium` or `High` for less noise.
 - Critical: material adverse developments such as mission anomalies, failures, major programme schedule changes, safety incidents, security issues, material allegations and significant misinformation. A critical event alerts independently of editorial tone; a routine weather postponement or routine positive coverage does not. Impact is independently rated High, Medium or Low. Local critical rules are approximate; semantic analysis is optional and may improve context handling, but both modes can misclassify articles. Human review remains essential.
-- Emails are grouped into one message per scan, ordered by impact and recency. Original headline, visible complete source URL, publisher, author, publication time IST, tone, impact, impact analysis and alert reason appear in both HTML and plain-text forms. No attachments or nil-action emails. Impact language is mild, measured and attributed; the rating appears separately from the analysis.
+- Emails are grouped into one message per scan, ordered by impact and recency. Original headline, visible complete source URL, publisher, author, publication time IST, tone, impact, impact analysis and alert reason appear in both HTML and plain-text forms. No attachments. A mandatory status email is sent even if no new items qualify; incomplete coverage is explicitly identified. Impact language is mild, measured and attributed; the rating appears separately from the analysis.
 
 | Setting | Default | Meaning |
 |---|---|---|
@@ -66,7 +66,7 @@ python -m unittest -v
 python monitor.py --dry-run
 ```
 
-The nine included tests cover local tone vs critical classification, routine news suppression, denied claims, canonical deduplication, independent publishers, formatted email escaping, state integrity, verified publication time and expiry, and successful/failed delivery state handling with mocked network/SMTP. Live GitHub scheduling, publisher availability, Gmail delivery, and optional Groq access require a deployment test; none is certified by local tests.
+The thirteen included tests cover local tone vs critical classification, routine news suppression, denied claims, canonical deduplication, independent publishers, formatted email escaping, state integrity, verified publication time and expiry, and successful/failed delivery state handling with mocked network/SMTP. Live GitHub scheduling, publisher availability, Gmail delivery, and optional Groq access require a deployment test; none is certified by local tests.
 
 ## 5. Relevant files
 
@@ -77,5 +77,7 @@ The nine included tests cover local tone vs critical classification, routine new
 - `state/alert_history.json` — automatically maintained duplicate protection.
 - `requirements.txt` — two runtime packages.
 - `test_monitor.py` — offline unit tests.
+
+At 96 planned daily scans, expect approximately 96 emails per recipient daily, plus manual and workflow-update runs. Local `--dry-run` remains preview-only for development.
 
 GitHub schedule documentation: https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule

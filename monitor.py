@@ -272,11 +272,47 @@ def archive_ids(cfg):
         return {identities({'url':u,'title':'','date':''})[0] for row in reader for c in cols if (u:=canonical(row.get(c,'')))}
 
 
-def format_email(articles,now):
+def format_email(articles,now,summary=None):
+    summary = summary or {}
+    sources = summary.get('sources', {})
+    failed = sum(not isinstance(v,int) for v in sources.values())
+    decisions = summary.get('decisions', {})
+    unverified = sum(v for k,v in decisions.items() if k not in (
+        'verified','outside window','routine notice','not substantively relevant','not independent publisher'))
+    limited = bool(failed or unverified or summary.get('candidate_cap_reached') or summary.get('unfinished_budget'))
+    error = summary.get('error')
+    if error:
+        subject = '[QRT ERROR] Monitoring scan failed'
+        result = 'Scan failed. No conclusion about news coverage can be drawn.'
+    elif articles:
+        subject = f"[QRT ALERT] {len(articles)} new item(s) | {max((a['impact'] for a in articles),key=LEVEL.get)} Impact"
+        if limited: subject += ' | Coverage warning'
+        result = f'{len(articles)} new qualifying article(s) detected.'
+    elif limited:
+        subject = '[QRT WARNING] Scan completed with limitations | 0 new items'
+        result = 'No new qualifying articles verified in the accessible results. Coverage was incomplete.'
+    else:
+        subject = '[QRT NIL] No new critical or negative news'
+        result = 'No new critical or negative news detected among the successfully screened results.'
+    stamp = now.astimezone(ed.IST).strftime('%d %B %Y, %H:%M:%S IST')
+    finished = datetime.now(UTC).astimezone(ed.IST).strftime('%d %B %Y, %H:%M:%S IST')
+    trigger = os.getenv('GITHUB_EVENT_NAME','local')
+    fields = [('Scan started',stamp),('Report prepared',finished),('Trigger',trigger),('Result',result)]
+    if error: fields.append(('Error type',str(error)))
+    if summary and not error:
+        fields += [('Monitoring window',f"Previous {summary.get('lookback_hours',6)} hours"),
+                   ('Discovery channels',f'{len(sources)-failed} successful / {len(sources)} attempted'),
+                   ('Candidates discovered',str(summary.get('candidates',0))),
+                   ('Articles verified',str(decisions.get('verified',0))),
+                   ('Previously alerted / archive duplicates',str(summary.get('duplicates',0))),
+                   ('New qualifying articles',str(len(articles)))]
+        if limited:
+            fields.append(('Coverage limitations',f'{failed} discovery channel(s) failed; {unverified} candidate(s) could not be fully verified; candidate cap reached: {bool(summary.get("candidate_cap_reached"))}; unfinished candidates: {summary.get("unfinished_budget",0)}.'))
+    heading = 'DoS / ISRO — QRT News Monitoring Report'
+    plain=[heading,'']+[f'{k}: {v}' for k,v in fields]+['']
+    rich=['<html><body style="font-family:Arial,sans-serif;color:#111"><h2>'+heading+'</h2>'] + [f'<p><b>{escape(k)}:</b> {escape(v)}</p>' for k,v in fields]
+
     ordered=sorted(articles,key=lambda a:(LEVEL[a['impact']],a['critical'],a['published']),reverse=True)
-    subject=f"[QRT ALERT] DoS/ISRO | {len(ordered)} new item(s) | {max((a['impact'] for a in ordered),key=LEVEL.get)} Impact"
-    plain=['DoS / ISRO — Critical and Negative News Alert',now.astimezone(ed.IST).strftime('%d %B %Y, %H:%M IST'),'']
-    rich=['<html><body style="font-family:Arial,sans-serif;color:#111"><h2>DoS / ISRO — Critical and Negative News Alert</h2>',f'<p>{escape(plain[1])}</p>']
     for i,a in enumerate(ordered,1):
         stamp=datetime.fromisoformat(a['published']).astimezone(ed.IST).strftime('%d %B %Y, %H:%M IST')
         fields=[('Publisher / Author',a['publisher']+' / '+a['author']),('Published',stamp),('Tone',a['tone']),('Impact',a['impact']),('Impact Analysis',a['impact']+' Impact.\n'+a['analysis']),('Alert reason','Critical development'+(' / Negative tone' if a['tone']=='Negative' else '') if a['critical'] else 'Negative tone')]
@@ -298,17 +334,16 @@ def mail_config():
     return sender,password,recipients
 
 
-def send(articles,now):
-    sender,password,recipients=mail_config(); subject,plain,rich=format_email(articles,now)
+def send(articles,now,summary=None):
+    sender,password,recipients=mail_config(); subject,plain,rich=format_email(articles,now,summary)
     msg=EmailMessage(); msg['Subject']=subject; msg['From']=sender; msg['To']=', '.join(recipients); msg.set_content(plain); msg.add_alternative(rich,subtype='html')
     with smtplib.SMTP_SSL('smtp.gmail.com',465,context=ssl.create_default_context(),timeout=25) as smtp:
         smtp.login(sender,password); refused=smtp.send_message(msg)
         if refused: raise RuntimeError('SMTP refused one or more recipients; delivery will be retried')
 
 
-def run(dry=False):
-    cfg=json.loads(CFG.read_text()); state=load_state(); now=datetime.now(UTC); deadline=time.monotonic()+cfg['scan_budget_seconds']
-    if not dry: mail_config()
+def scan(now,dry=False):
+    cfg=json.loads(CFG.read_text()); state=load_state(); deadline=time.monotonic()+cfg['scan_budget_seconds']
     cutoff=(now-timedelta(days=cfg['history_days'])).timestamp()
     state['sent']={k:v for k,v in state['sent'].items() if v>=cutoff}
     # Non-alert checks expire so updated articles can be reassessed.
@@ -318,7 +353,7 @@ def run(dry=False):
     if not any(isinstance(v,int) for v in status.values()): raise RuntimeError('All discovery channels failed')
     pending=[c for c in candidates if digest(c['url']) not in state['checked']]
     capped=len(pending)>cfg['max_candidates']; pending=pending[:cfg['max_candidates']]
-    selected=[]; keys=set(state['sent'])|archive; decisions={}; start=now.timestamp(); unfinished=0
+    selected=[]; keys=set(state['sent'])|archive; decisions={}; start=now.timestamp(); unfinished=0; duplicates=0
     # Bounded batches; do not queue unlimited work past the scan budget.
     with ThreadPoolExecutor(max_workers=8) as pool:
         for i in range(0,len(pending),8):
@@ -335,24 +370,36 @@ def run(dry=False):
                     state['checked'][rawkey]=start if reason in ('outside window','routine notice','not substantively relevant','not independent publisher') else start-2700
                     continue
                 ids=identities(a)
-                if keys.intersection(ids): state['checked'][rawkey]=start; continue
+                if keys.intersection(ids): duplicates+=1; state['checked'][rawkey]=start; continue
                 a.update(analyse(a) if time.monotonic()<deadline else local_analysis(a))
                 if qualifies(a,cfg):
                     a['_ids']=ids; a['_rawkey']=rawkey; keys.update(ids); selected.append(a)
                 else: state['checked'][rawkey]=start
-    summary={'scan_ist':now.astimezone(ed.IST).isoformat(),'sources':status,'candidates':len(candidates),'decisions':decisions,'alerts':len(selected),'candidate_cap_reached':capped,'unfinished_budget':unfinished,'dry_run':dry}
+    summary={'scan_ist':now.astimezone(ed.IST).isoformat(),'sources':status,'candidates':len(candidates),'decisions':decisions,'alerts':len(selected),'candidate_cap_reached':capped,'unfinished_budget':unfinished,'dry_run':dry,'duplicates':duplicates,'lookback_hours':cfg['lookback_hours']}
     (ROOT/'scan_summary.json').write_text(json.dumps(summary,indent=2)); print(json.dumps(summary))
+    return selected,state,summary
+
+
+def run(dry=False):
+    now=datetime.now(UTC)
+    if not dry: mail_config()
+    try:
+        selected,state,summary=scan(now,dry)
+    except Exception as exc:
+        summary={'error':type(exc).__name__, 'scan_ist':now.astimezone(ed.IST).isoformat()}
+        if not dry:
+            send([],now,summary)  # Report scan failure, then preserve failed job status.
+        raise
     if dry:
-        if selected: (ROOT/'preview.txt').write_text(format_email(selected,now)[1])
+        (ROOT/'preview.txt').write_text(format_email(selected,now,summary)[1])
         return
-    if selected:
-        send(selected,now)  # No state marking before successful SMTP acceptance.
-        for a in selected:
-            for k in a['_ids']: state['sent'][k]=start
-            state['checked'][a['_rawkey']]=start
+    send(selected,now,summary)  # Mandatory heartbeat even for zero qualifying articles.
+    for a in selected:
+        for k in a['_ids']: state['sent'][k]=now.timestamp()
+        state['checked'][a['_rawkey']]=now.timestamp()
     save_state(state)
-    if capped or unfinished: print('WARNING: scan bounded; increase candidate cap/budget or tune feeds if persistent.')
-    if pending and not decisions.get('verified') and any('error' in k or 'unresolved' in k for k in decisions): print('WARNING: no verified articles; inspect source access.')
+    if summary['candidate_cap_reached'] or summary['unfinished_budget']: print('WARNING: scan bounded; increase candidate cap/budget or tune feeds if persistent.')
+    if not summary['decisions'].get('verified') and any('error' in k or 'unresolved' in k for k in summary['decisions']): print('WARNING: no verified articles; inspect source access.')
 
 
 if __name__=='__main__':
