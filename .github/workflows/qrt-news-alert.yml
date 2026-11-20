@@ -8,7 +8,7 @@ on:
       dry_run:
         description: 'Preview only (no email, no state changes)'
         type: boolean
-        default: true
+        default: false
 permissions:
   contents: write
 concurrency:
