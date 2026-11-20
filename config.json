@@ -1,0 +1,13 @@
+{
+  "lookback_hours": 6,
+  "history_days": 30,
+  "max_candidates": 100,
+  "scan_budget_seconds": 300,
+  "negative_min_impact": "Low",
+  "queries": ["ISRO", "Department of Space India", "IN-SPACe OR NSIL India", "Gaganyaan OR Chandrayaan OR NavIC", "PSLV OR GSLV OR LVM3 OR SSLV India", "India space startup", "ISRO failure OR delay OR criticism OR anomaly OR cyberattack"],
+  "publisher_feeds": ["https://www.thehindu.com/sci-tech/science/feeder/default.rss", "https://www.thehindu.com/news/national/feeder/default.rss"],
+  "google_news": true,
+  "bing_news": true,
+  "gdelt": true,
+  "suppress_daily_archive": false
+}

@@ -1,0 +1,18 @@
+ILLUSTRATIVE EMAIL ONLY — synthetic headline, not an actual news item.
+
+Subject: [QRT ALERT] DoS/ISRO | 1 new item(s) | High Impact
+
+DoS / ISRO — Critical and Negative News Alert
+
+1. [Illustrative] Mission anomaly reported during a launch vehicle test
+Source URL: [Original publisher's complete verified URL]
+Publisher / Author: [Publisher] / [Author]
+Published: [Date and Time, IST]
+Tone: Neutral
+Impact: High
+Impact Analysis:
+High Impact.
+The article reports an anomaly during a launch vehicle test. The coverage may be relevant to mission readiness and related technical activities, subject to factual confirmation.
+Alert reason: Critical development
+
+Automated screening of publisher coverage; reported claims are not independent official confirmation.
